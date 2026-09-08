@@ -14,11 +14,15 @@ Run with:  streamlit run app.py
 """
 from __future__ import annotations
 
+import math
 import os
 
 import numpy as np
 import pandas as pd
 import altair as alt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import streamlit as st
 
 import ewmfa_model as em
@@ -107,12 +111,53 @@ def indicator_bar(series: pd.Series, meta: dict) -> alt.Chart:
     )
 
 
+def _human(num):
+    if num == 0:
+        return "0"
+    sign = "-" if num < 0 else ""
+    n = abs(num)
+    for div, suf, dec in [(1e9, "B", 2), (1e6, "M", 2), (1e3, "k", 1)]:
+        if n >= div:
+            return f"{sign}{n/div:.{dec}f} {suf}"
+    return f"{sign}{n:.0f}"
+
+
+def ptb_symlog_figure(series: pd.Series):
+    """Diverging symmetric-log PTB chart, reproducing the notebook axis."""
+    s = series.sort_values(ascending=False)
+    labels = list(s.index)
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    colors = ["#c0392b" if v >= 0 else "#3E6E8E" for v in s]   # red importer / blue exporter
+    ax.barh(labels, s.values, color=colors)
+    ax.axvline(0, linewidth=0.8, color="black")
+    ax.set_xscale("symlog", linthresh=1)
+    m = float(np.abs(s.values).max())
+    if m > 0:
+        lim = 10 ** math.ceil(math.log10(m))
+        ax.set_xlim(-lim * 4, lim * 4)      # symmetric headroom for value labels
+    for yi, val in enumerate(s.values):     # value labels just past each bar tip
+        if val >= 0:
+            ax.text(val, yi, "  " + _human(val), va="center", ha="left", fontsize=8.5)
+        elif val < 0:
+            ax.text(val, yi, _human(val) + "  ", va="center", ha="right", fontsize=8.5)
+    ax.invert_yaxis()
+    ax.set_xlabel("Imports − Exports (kg/yr)   |   ← net exporter        net importer →")
+    ax.grid(axis="x", alpha=0.25)
+    fig.tight_layout()
+    return fig
+
+
 def render_indicator(meta: dict, series: pd.Series, n: int) -> None:
     st.markdown(f"#### {n}. {meta['name']} ({meta['key']})")
     st.latex(meta["formula"])
     st.markdown(f"{meta['description']}")
     st.caption(f"Reference: {meta['reference']}")
-    st.altair_chart(indicator_bar(series, meta), use_container_width=True)
+    if meta["key"] == "PTB":
+        fig = ptb_symlog_figure(series)
+        st.pyplot(fig)
+        plt.close(fig)
+    else:
+        st.altair_chart(indicator_bar(series, meta), use_container_width=True)
     st.divider()
 
 
