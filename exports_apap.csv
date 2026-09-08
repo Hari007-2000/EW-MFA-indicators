@@ -1,0 +1,100 @@
+Commodity,EXPORTS,FINAL_DEMAND
+Acetic Acid,615304063.8,0
+Acetic Acid Byproduct 1,0,0
+Carbon Monoxide,0,0
+Methanol,1417266888,0
+Acetic Acid Byproduct 2,0,0
+Acetic Acid Waste,0,0
+Acetic Acid Byproduct 3,0,0
+Water,0,0
+Acetic Anhydride,60405345.61,0
+Acetone,73938849,0
+Methane,29549444960,0
+Acetic Anhydride Byproduct,0,0
+Acetic Anhydride Waste,0,0
+Acetone Byproduct 1,0,0
+Iso propanol,197204135.9,0
+Acetone Byproduct 2,0,0
+Acetone Waste,0,0
+Ammonia,96826320,0
+Argon,18503867.31,0
+Ammonia Byproduct 1,0,0
+Ammonia Equilibrium Reactor Feed,0,0
+Ammonia Equilibrium Reactor Product,0,0
+Hydrogen SMR,1719433.8,0
+Liquid Impure Ammonia,0,0
+Nitrogen,17584204.5,0
+Alkane Gas Mixture,0,0
+Ammonia Gas Mixture,0,0
+Air Mixture,0,0
+Ammonia Output Gas Mixture,0,0
+Ammonia Byproduct 2,0,0
+Ammonia Byproduct 3,0,0
+Ammonia Waste,0,0
+Acetaminophen,3459981.431,23562800
+Para aminophenol,74093.95,0
+APAP Waste 1,0,0
+APAP Waste 2,0,0
+Benzene,37938450.6,0
+Coke,1128383754,0
+Benzene Naphtha,7334937305,0
+Naphthalene,0,0
+Benzene Byproduct,0,0
+Benzene Waste,0,0
+Air,0,0
+Carbon Dioxide,110867337.8,0
+Hydrogen Byproduct,0,0
+Hydrogen Waste,0,0
+IPA Gas Mixture,0,0
+Sulphuric acid,260773316.7,0
+Propane,10306057607,0
+Propene,676935985.4,0
+IPA Byproduct,0,0
+IPA Waste,0,0
+Ethane,4284853206,0
+Methane Feedgas,59098889920,0
+Methane Gas Mixture,0,0
+Methane Lean Gas,0,0
+Methane Lean TEG,0,0
+Methane Rich TEG,0,0
+Methane Byproduct 1,0,0
+Methane Byproduct 2,0,0
+Methane Waste,0,0
+Methanol Byproduct 1,0,0
+Methanol Nitrogen_Water ,0,0
+Methanol Byproduct 2,0,0
+Methanol Waste,0,0
+Methanol MeOH_EtOH_Water,0,0
+Methanol Gas Mixture,0,0
+Nitric Acid,32638565.71,0
+Nitro benzene,1075370.769,0
+Nitrobenzene Waste,0,0
+Nitric Acid Gas Mixture 1,0,0
+Nitric Acid Water Mixture,0,0
+Nitric Acid Gas Mixture 2,0,0
+Nitric Acid Gas Mixture 3,0,0
+Nitric Acid Byproduct,0,0
+Nitric Acid Waste,0,0
+Aniline,1506564.733,0
+PAP Waste 1,0,0
+PAP Waste 2,0,0
+PAP Waste 3,0,0
+PAP Waste 4,0,0
+Crude AGO,0,0
+Butane,8243463849,0
+Diesel,20984393.27,0
+Crude Gas Mixture,0,0
+Crude HNaphtha,0,0
+Kerosene,4185610.127,0
+Mixcrude,64004868855,0
+Naphtha,7334937305,0
+Crude Byproduct,0,0
+Pentane,47137460.32,0
+Crude Waste,0,0
+Propene Byproduct,0,0
+Propene C2H6_H2,0,0
+Propene CH4_H2,0,0
+Propene Waste,0,0
+Sulfuric Acid Byproduct,0,0
+Sulfur,1297432215,0
+Sulfuric Acid Waste,0,0
