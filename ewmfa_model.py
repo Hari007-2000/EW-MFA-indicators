@@ -173,7 +173,7 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
     URS = _safe_div(PRM - pd.Series(r, index=industries), PRM, industries) * 100
 
     results = pd.DataFrame({
-        "PTB": PTB, "MID": MID, "CSID": CSID, "DIIS": DIIS,
+        "PTB": PTB, "MID": MID, "CSID": CSID, "SMIR": DIIS,
         "WGI": WGI, "PWPR": PWPR, "MUE": MUE, "MIU": MIU,
         "RF": RF, "WM": WM, "BL": BL, "URS": URS,
     })
@@ -221,12 +221,13 @@ DIRECT_INDICATORS = [
                      "(diagonal self-use excluded).",
          reference="Miller & Blair (2009), Input-Output Analysis.",
          decision="Strengthen cross-sector supply coordination?"),
-    dict(key="DIIS", name="Domestic Intermediate Input Share", unit="%", diverging=False, direction=+1,
-         formula=r"\mathrm{DIIS}_j = \dfrac{\sum_{i} Z_{ij}}{\mathrm{TMI}_j}\times 100",
-         description="Share of total inputs from domestic intermediate transactions "
+    dict(key="SMIR", name="Secondary Material Input Rate", unit="%", diverging=False, direction=+1,
+         formula=r"\mathrm{SMIR}_j = \dfrac{\sum_{i} Z_{ij}}{\mathrm{TMI}_j}\times 100",
+         description="Share of total material input supplied as secondary (intermediate) "
+                     "materials from within the modelled production system "
                      "(includes diagonal self-use).",
-         reference="Miller & Blair (2009).",
-         decision="Manage internal supply concentration?"),
+         reference="Eurostat (2018); Haas et al. (2015), J. Ind. Ecol.",
+         decision="Leverage secondary-material / circular sourcing?"),
     dict(key="WGI", name="Waste Generation Intensity", unit="%", diverging=False, direction=+1,
          formula=r"\mathrm{WGI}_j = \dfrac{W_j}{\mathrm{TMI}_j}\times 100",
          description="Percentage of total material input that leaves the industry as waste.",

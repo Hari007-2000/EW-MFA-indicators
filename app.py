@@ -173,6 +173,14 @@ def page_direct():
         "and press **Compute the Indicators**."
     )
 
+    _mfa = os.path.join(_HERE, "mfa_overview.png")
+    if os.path.exists(_mfa):
+        with st.container(border=True):
+            st.markdown("**What material-flow analysis (MFA) delivers in manufacturing**")
+            lc, mc, rc = st.columns([1, 6, 1])
+            mc.image(_mfa, use_container_width=True)
+            st.caption("Reference: Eurostat, Economy-wide material flow accounts (EW-MFA).")
+
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
         up_piot = c1.file_uploader("PIOT CSV", type=["csv"], key="u_piot")
@@ -251,8 +259,6 @@ def page_leontief():
             "assessment** — the footprint embodied across the supply chain, not just "
             "at the final stage."
         )
-    st.caption("Note: the Primary Resource Multiplier (PRM) is used internally to build "
-               "RF and URS but is not reported here, as requested.")
 
     if not has_results():
         st.warning("Compute the indicators first on the **EW-MFA Indicators** page, "
