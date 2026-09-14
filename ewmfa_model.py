@@ -65,6 +65,118 @@ def _resolve_commodity(industry, trade_index):
     return hits[0] if len(hits) == 1 else None
 
 
+# Source-name -> PIOT industry name for Domestic Extraction files that use
+# abbreviations / alternative spellings.
+DE_ALIASES = {
+    "apap": "Acetaminophen", "pap": "Para aminophenol", "ipa": "Iso propanol",
+    "hydrogen": "Hydrogen SMR", "hydrogen smr": "Hydrogen SMR",
+    "nitrobenzene": "Nitro benzene", "sulfuric acid": "Sulphuric acid",
+    "sulphuric acid": "Sulphuric acid", "crude refining": "Naphtha",
+}
+
+
+def load_resource_intensity(source, industries) -> pd.Series:
+    """
+    Load a per-commodity resource-intensity table (kg natural resource per kg
+    product). Accepts a column named like 'Resource_Intensity'/'RI'/'intensity'
+    keyed by commodity in the first column (or index). Aligned to industries by
+    exact / alias / case-insensitive / substring; unmatched -> 0.
+    """
+    raw = pd.read_csv(source)
+    raw.columns = [str(c).strip() for c in raw.columns]
+    name_col = raw.columns[0]
+    val_col = None
+    for c in raw.columns[1:]:
+        cl = c.lower()
+        if "resource_intensity" in cl or cl in ("ri", "intensity") or \
+           ("resource" in cl and "intensit" in cl):
+            val_col = c
+            break
+    if val_col is None:                     # fall back to a single-value 2nd column
+        val_col = raw.columns[1] if len(raw.columns) >= 2 else None
+    name_val = {}
+    if val_col is not None:
+        for _, row in raw.iterrows():
+            name_val[str(row[name_col]).strip()] = pd.to_numeric(row[val_col], errors="coerce")
+    lower_names = {k.lower(): k for k in name_val}
+    out = {}
+    for ind in industries:
+        v = None
+        if ind in name_val:
+            v = name_val[ind]
+        elif ind.lower() in lower_names:
+            v = name_val[lower_names[ind.lower()]]
+        else:
+            for src in name_val:
+                if DE_ALIASES.get(src.strip().lower()) == ind:
+                    v = name_val[src]
+                    break
+            if v is None:
+                hits = [n for n in name_val
+                        if ind.lower() in n.lower() or n.lower() in ind.lower()]
+                if len(hits) == 1:
+                    v = name_val[hits[0]]
+        out[ind] = float(v) if (v is not None and v == v) else 0.0
+    return pd.Series(out, index=industries)
+
+
+def load_de(source, industries) -> pd.Series:
+    """
+    Load a Domestic Extraction table and align it to the PIOT industries.
+
+    Accepts either:
+      * long format  : columns [Industry/Commodity, DE]
+      * wide format  : a row labelled 'DE' across industry-name columns
+    Names are matched by exact / alias (DE_ALIASES) / case-insensitive /
+    unique-substring. Anything unmatched is 0.
+    """
+    raw = pd.read_csv(source)
+    raw.columns = [str(c).strip() for c in raw.columns]
+    first = raw.columns[0]
+
+    name_val: dict[str, float] = {}
+    de_row = None
+    for _, row in raw.iterrows():
+        if str(row[first]).strip().lower() in ("de", "domestic extraction",
+                                               "domestic extraction (de)"):
+            de_row = row
+            break
+    if de_row is not None:                                   # wide format
+        for c in raw.columns[1:]:
+            name_val[c.strip()] = pd.to_numeric(de_row[c], errors="coerce")
+    else:                                                    # long format
+        valcol = None
+        for c in raw.columns[1:]:
+            if "de" in c.lower() or "extract" in c.lower():
+                valcol = c
+                break
+        if valcol is None and len(raw.columns) >= 2:
+            valcol = raw.columns[1]
+        for _, row in raw.iterrows():
+            name_val[str(row[first]).strip()] = pd.to_numeric(row[valcol], errors="coerce")
+
+    lower_names = {k.lower(): k for k in name_val}
+    result = {}
+    for ind in industries:
+        val = None
+        if ind in name_val:
+            val = name_val[ind]
+        elif ind.lower() in lower_names:
+            val = name_val[lower_names[ind.lower()]]
+        else:
+            for src in name_val:                             # source -> PIOT alias
+                if DE_ALIASES.get(src.strip().lower()) == ind:
+                    val = name_val[src]
+                    break
+            if val is None:
+                hits = [n for n in name_val
+                        if ind.lower() in n.lower() or n.lower() in ind.lower()]
+                if len(hits) == 1:
+                    val = name_val[hits[0]]
+        result[ind] = float(val) if (val is not None and val == val) else 0.0
+    return pd.Series(result, index=industries)
+
+
 # --------------------------------------------------------------------------- #
 # Accounting vectors
 # --------------------------------------------------------------------------- #
@@ -110,13 +222,19 @@ def _safe_div(n, d, industries):
 # Full computation
 # --------------------------------------------------------------------------- #
 def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
-                       exports_bytes: bytes | None) -> dict:
+                       exports_bytes: bytes | None, de_bytes: bytes | None = None,
+                       ri_bytes: bytes | None = None) -> dict:
     """
     Compute the 8 direct + 4 Leontief indicators.
+
+    Material Import Dependency now uses commodity-file imports and
+    DMI = Domestic Extraction + Imports:  MID_j = IMP_j / DMI_j x 100.
+    The Leontief resource-intensity vector r is DMI / total-output.
 
     Returns a dict with:
       results   : DataFrame [industry x indicator]  (12 columns)
       ptb_table : DataFrame with resolved main commodity + imports/exports/PTB
+      dmi_table : DataFrame with Domestic Extraction, Imports and DMI
       accounting: DataFrame of the PIOT accounting vectors
       industries: list
     """
@@ -146,8 +264,17 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
 
     PTB = (imports_ptb - exports_ptb).astype(float)
 
-    # ----- The other seven direct indicators -------------------------------- #
-    MID = _safe_div(imports, TMI, industries) * 100
+    # ----- Domestic Extraction, Imports and Direct Material Input ----------- #
+    # "Imports" for MID / DMI come directly from the commodity imports file.
+    imports_commodity = imports_ptb.copy()
+    if de_bytes is not None:
+        DE = load_de(io.BytesIO(de_bytes), industries)
+    else:
+        DE = pd.Series(0.0, index=industries)
+    DMI = (DE + imports_commodity).astype(float)            # DMI = DE + Imports
+
+    # ----- Direct indicators ------------------------------------------------ #
+    MID = _safe_div(imports_commodity, DMI, industries) * 100     # IMP / DMI x 100
     CSID = _safe_div(cross_sector_in, TMI, industries) * 100
     DIIS = _safe_div(II_in, TMI, industries) * 100
     WGI = _safe_div(waste, TMI, industries) * 100
@@ -162,7 +289,14 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
     A = Zn * inv_x[np.newaxis, :]
     L = np.linalg.inv(np.eye(len(industries)) - A)
 
-    r = (imports.to_numpy() + acc["ROE_in"].to_numpy()) * inv_x      # primary-resource intensity
+    # Resource intensity r (kg natural resource / kg output). Prefer the uploaded
+    # resource-intensity file; otherwise fall back to DMI / output.
+    if ri_bytes is not None:
+        RI = load_resource_intensity(io.BytesIO(ri_bytes), industries)
+        r = RI.to_numpy(dtype=float)
+    else:
+        RI = pd.Series(DMI.to_numpy() * inv_x, index=industries)
+        r = RI.to_numpy(dtype=float)
     w = waste.to_numpy() * inv_x                                     # waste intensity
     y = (acc["final_demand"] + acc["exports_col"] + acc["ROE_out"]).to_numpy(dtype=float)
 
@@ -185,6 +319,14 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
         "PTB (kg/yr)": PTB,
     }, index=industries)
 
+    dmi_table = pd.DataFrame({
+        "Domestic Extraction (kg/yr)": DE,
+        "Imports (kg/yr)": imports_commodity,
+        "DMI = DE + Imports (kg/yr)": DMI,
+        "MID = Imports/DMI (%)": MID,
+    }, index=industries)
+    dmi_table.index.name = "Industry"
+
     accounting = pd.DataFrame({
         "II_in": acc["II_in"], "Self_use": acc["self_use"],
         "Cross_sector_in": cross_sector_in, "ROE_in": acc["ROE_in"],
@@ -194,8 +336,9 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
         "Waste": waste, "Total_output": acc["TO"],
     })
 
-    return dict(results=results, ptb_table=ptb_table, accounting=accounting,
-                industries=industries, spectral_radius=float(np.max(np.abs(np.linalg.eigvals(A)))))
+    return dict(results=results, ptb_table=ptb_table, dmi_table=dmi_table,
+                accounting=accounting, industries=industries,
+                spectral_radius=float(np.max(np.abs(np.linalg.eigvals(A)))))
 
 
 # --------------------------------------------------------------------------- #
@@ -206,46 +349,79 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
 DIRECT_INDICATORS = [
     dict(key="PTB", name="Physical Trade Balance", unit="kg/yr", diverging=True, direction=+1,
          formula=r"\mathrm{PTB}_j = \mathrm{IMP}_j - \mathrm{EXP}_j",
-         description="Net physical trade on the industry's main traded product. "
-                     "Positive = net importer; negative = net exporter.",
+         description="The net physical trade position for the industry's principal traded "
+                     "product — imports minus exports, in kilograms per year. A positive "
+                     "value marks a net importer, meaning the network leans on foreign "
+                     "supply for that commodity; a negative value marks a net exporter, "
+                     "where domestic output exceeds domestic use. It pinpoints where supply "
+                     "security rides on trade flows that could be interrupted.",
          reference="Eurostat (2018), Economy-wide material flow accounts handbook.",
          decision="Secure domestic supply / onshore?"),
     dict(key="MID", name="Material Import Dependency", unit="%", diverging=False, direction=+1,
-         formula=r"\mathrm{MID}_j = \dfrac{\mathrm{IMP}_j}{\mathrm{TMI}_j}\times 100",
-         description="Share of an industry's total material input that is met by imports.",
+         formula=r"\mathrm{MID}_j = \dfrac{\mathrm{IMP}_j}{\mathrm{DMI}_j}\times 100,\quad "
+                 r"\mathrm{DMI}_j = \mathrm{DE}_j + \mathrm{IMP}_j",
+         description="The fraction of an industry's direct material input (domestic "
+                     "extraction plus imports) that is covered by imports, as a percentage. "
+                     "A high value means the commodity's material base is sourced abroad and "
+                     "is exposed to trade, tariff and price shocks; a low value means it is "
+                     "met largely from domestic extraction. Imports come from the commodity "
+                     "imports file and DE from the domestic-extraction file.",
          reference="Eurostat (2018); OECD (2008), Measuring material flows.",
          decision="Reduce import dependency / diversify suppliers?"),
     dict(key="CSID", name="Cross-Sector Input Dependency", unit="%", diverging=False, direction=+1,
          formula=r"\mathrm{CSID}_j = \dfrac{\sum_{i\neq j} Z_{ij}}{\mathrm{TMI}_j}\times 100",
-         description="Share of total inputs supplied by OTHER modelled industries "
-                     "(diagonal self-use excluded).",
+         description="The share of an industry's total material input supplied by OTHER "
+                     "modelled industries, excluding its own recycled (diagonal) flow. It "
+                     "measures how tightly a commodity is coupled to its domestic upstream "
+                     "partners: a high value signals strong internal interdependence, so a "
+                     "disruption in one sector propagates readily into this one.",
          reference="Miller & Blair (2009), Input-Output Analysis.",
          decision="Strengthen cross-sector supply coordination?"),
     dict(key="SMIR", name="Secondary Material Input Rate", unit="%", diverging=False, direction=+1,
          formula=r"\mathrm{SMIR}_j = \dfrac{\sum_{i} Z_{ij}}{\mathrm{TMI}_j}\times 100",
-         description="Share of total material input supplied as secondary (intermediate) "
-                     "materials from within the modelled production system "
-                     "(includes diagonal self-use).",
+         description="The share of total material input met by intermediate materials "
+                     "circulating within the modelled system, including the industry's own "
+                     "recycled (self-use) flow. It is a proxy for how much feedstock is "
+                     "'secondary' — already inside the industrial network rather than freshly "
+                     "extracted — so higher values point to greater circularity potential. "
+                     "Because it combines cross-sector and self-use flows it is not, on its "
+                     "own, a strict circularity metric.",
          reference="Eurostat (2018); Haas et al. (2015), J. Ind. Ecol.",
          decision="Leverage secondary-material / circular sourcing?"),
     dict(key="WGI", name="Waste Generation Intensity", unit="%", diverging=False, direction=+1,
          formula=r"\mathrm{WGI}_j = \dfrac{W_j}{\mathrm{TMI}_j}\times 100",
-         description="Percentage of total material input that leaves the industry as waste.",
+         description="The percentage of an industry's total material input that leaves as "
+                     "waste rather than product. It captures how much of everything entering "
+                     "the process is lost — combining conversion inefficiency and unusable "
+                     "co-streams — so the highest values flag the strongest candidates for "
+                     "closed-loop recovery and waste valorisation.",
          reference="Eurostat (2018); Nakamura & Kondo (2009), Waste Input-Output.",
          decision="Need for closed-loop recovery?"),
     dict(key="PWPR", name="Physical Waste-to-Product Ratio", unit="kg/kg", diverging=False, direction=+1,
          formula=r"\mathrm{PWPR}_j = \dfrac{W_j}{\mathrm{PROD}_j}",
-         description="Kilograms of waste generated per kilogram of non-waste product.",
+         description="Kilograms of waste generated per kilogram of saleable product — the "
+                     "waste-to-product ratio at the factory gate. Unlike WGI (normalised by "
+                     "input), this expresses waste relative to useful output, so a value of 2 "
+                     "means two kilograms of waste accompany every kilogram of product. It "
+                     "highlights processes where waste minimisation or redesign would deliver "
+                     "the largest absolute reductions.",
          reference="Allwood et al. (2011), Material efficiency.",
          decision="Priority for waste minimisation / process redesign?"),
     dict(key="MUE", name="Material Utilization Efficiency", unit="%", diverging=False, direction=-1,
          formula=r"\mathrm{MUE}_j = \dfrac{\mathrm{PROD}_j}{\mathrm{TMI}_j}\times 100",
-         description="Share of input mass converted into useful (non-waste) product.",
+         description="The percentage of input mass converted into useful, non-waste product. "
+                     "It is the efficiency counterpart of WGI — under strict mass balance "
+                     "MUE + WGI ≈ 100% — so a low value means most material entering the "
+                     "process is lost and signals a strong need for efficiency improvement.",
          reference="Allwood et al. (2011); OECD (2008).",
          decision="Need for process-efficiency improvement?"),
     dict(key="MIU", name="Material Intensity per Unit Product", unit="kg/kg", diverging=False, direction=+1,
          formula=r"\mathrm{MIU}_j = \dfrac{\mathrm{TMI}_j}{\mathrm{PROD}_j}",
-         description="Kilograms of material input required per kilogram of product.",
+         description="The kilograms of material input required to make one kilogram of "
+                     "product — the reciprocal of material efficiency. It is a direct measure "
+                     "of how material-hungry a process is: high values raise feedstock, "
+                     "handling and logistics costs and mark the material-intensive stages of "
+                     "the supply chain.",
          reference="Schmidt-Bleek (1993), MIPS concept.",
          decision="Reduce material intensity / feedstock burden?"),
 ]
@@ -253,26 +429,42 @@ DIRECT_INDICATORS = [
 LEONTIEF_INDICATORS = [
     dict(key="RF", name="Resource Footprint", unit="kg/yr", diverging=False, direction=+1,
          formula=r"\mathrm{RF}_j = \mathrm{PRM}_j \times y_j,\quad \mathrm{PRM}_j=\sum_i r_i\,l_{ij}",
-         description="Primary material embodied in the final demand delivered by the "
-                     "sector — direct plus all upstream requirements.",
+         description="The total primary natural resource embodied in the final demand "
+                     "delivered by the sector, found by propagating each unit of demand "
+                     "through the whole upstream chain (Leontief inverse) weighted by each "
+                     "sector's resource intensity r. It answers 'how much natural resource — "
+                     "water, oxygen, nitrogen, sulphur and the like — is ultimately drawn to "
+                     "satisfy demand for this commodity', direct plus indirect. Larger "
+                     "footprints identify the commodities whose consumption places the "
+                     "greatest burden on primary resources.",
          reference="Wiedmann et al. (2015), PNAS; Tukker et al. (2016), Glob. Env. Change.",
          decision="Manage upstream resource burden / footprint?"),
     dict(key="WM", name="Waste Multiplier", unit="kg/kg", diverging=False, direction=+1,
          formula=r"\mathrm{WM}_j = \sum_i w_i\,l_{ij}",
-         description="Total waste generated across the whole upstream chain per unit of "
-                     "the sector's output.",
+         description="The total waste generated across the entire upstream supply chain per "
+                     "unit of a sector's output, obtained by weighting the Leontief inverse "
+                     "by each sector's waste intensity. It captures embodied (indirect) waste "
+                     "that gate-level indicators miss, so a high value means producing this "
+                     "commodity triggers large waste generation elsewhere in the network.",
          reference="Nakamura & Kondo (2002), J. Ind. Ecol.; Duchin (1990).",
          decision="Target upstream (embodied) waste reduction?"),
     dict(key="BL", name="Backward Linkage", unit="kg/kg", diverging=False, direction=+1,
          formula=r"\mathrm{BL}_j = \sum_i l_{ij}",
-         description="Column sum of the Leontief inverse — total output pulled from the "
-                     "whole network per unit of final demand (depth of upstream reliance).",
+         description="The column sum of the Leontief inverse: the total output pulled from "
+                     "the whole network — directly and indirectly — for each unit of final "
+                     "demand for the commodity. It measures how deep and wide a commodity's "
+                     "upstream dependence runs; a value well above 1 marks a commodity whose "
+                     "demand strongly stimulates, and depends on, the rest of the supply "
+                     "chain — a key resilience consideration.",
          reference="Rasmussen (1956); Hirschman (1958), Strategy of Econ. Development.",
          decision="Prioritise supply-chain resilience (deep upstream reliance)?"),
     dict(key="URS", name="Upstream Resource Share", unit="%", diverging=False, direction=+1,
          formula=r"\mathrm{URS}_j = \left(\dfrac{\mathrm{PRM}_j - r_j}{\mathrm{PRM}_j}\right)\times 100",
-         description="Share of the embodied primary resource that is drawn from UPSTREAM "
-                     "sectors rather than the sector's own stage.",
+         description="The share of a commodity's total embodied primary resource that is "
+                     "drawn from upstream sectors rather than from its own production stage, "
+                     "as a percentage. A high value means most of the resource burden sits "
+                     "with suppliers, so securing or decarbonising the feedstock chain "
+                     "matters more than acting on the final stage alone.",
          reference="Suh (2004), Ecol. Econ.; Udo de Haes et al. (2002).",
          decision="Secure upstream feedstock (not just the final stage)?"),
 ]

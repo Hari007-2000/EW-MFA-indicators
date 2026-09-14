@@ -30,7 +30,7 @@ reproduces `PIOT_Model_D_Indicators_Colab_Final.ipynb`.
 |------|---------|
 | `app.py` | The 3-page Streamlit app |
 | `ewmfa_model.py` | Compute engine + indicator metadata (formulas, references, decision rules) |
-| `PIOT_ModelD_APAP_workshop.csv` | Bundled sample PIOT |
+| `PIOT_ModelD_APAP_workshop_final.csv` | Bundled sample PIOT |
 | `imports_apap.csv`, `exports_apap.csv` | Bundled sample trade files |
 | `requirements.txt` | Dependencies |
 

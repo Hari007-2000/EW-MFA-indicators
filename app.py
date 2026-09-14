@@ -45,10 +45,21 @@ st.markdown(
     """, unsafe_allow_html=True)
 
 _HERE = os.path.dirname(__file__)
+def _first_existing(*names):
+    for n in names:
+        p = os.path.join(_HERE, n)
+        if os.path.exists(p):
+            return p
+    return os.path.join(_HERE, names[0])
+
+
 SAMPLE = {
-    "piot": os.path.join(_HERE, "PIOT_ModelD_APAP_workshop.csv"),
+    "piot": _first_existing("PIOT_ModelD_APAP_workshop_final.csv",
+                            "PIOT_ModelD_APAP_workshop.csv"),
     "imports": os.path.join(_HERE, "imports_apap.csv"),
     "exports": os.path.join(_HERE, "exports_apap.csv"),
+    "de": os.path.join(_HERE, "domestic_extraction.csv"),
+    "ri": os.path.join(_HERE, "resource_intensity.csv"),
 }
 LEVEL_COLORS = {"Low": "#2e7d32", "Medium": "#f39c12", "High": "#c0392b"}
 
@@ -71,8 +82,8 @@ def _read(path):
         return fh.read()
 
 
-def run_compute(piot_b, imp_b, exp_b, source_label):
-    out = em.compute_indicators(piot_b, imp_b, exp_b)
+def run_compute(piot_b, imp_b, exp_b, source_label, de_b=None, ri_b=None):
+    out = em.compute_indicators(piot_b, imp_b, exp_b, de_b, ri_b)
     st.session_state["computed"] = out
     st.session_state["source_label"] = source_label
 
@@ -152,7 +163,10 @@ def render_indicator(meta: dict, series: pd.Series, n: int) -> None:
     st.latex(meta["formula"])
     st.markdown(f"{meta['description']}")
     st.caption(f"Reference: {meta['reference']}")
-    if meta["key"] == "PTB":
+    if meta["key"] == "MID":
+        st.caption("Per-commodity MID values are listed in the "
+                   "**Direct Material Input (DMI)** table above.")
+    elif meta["key"] == "PTB":
         fig = ptb_symlog_figure(series)
         st.pyplot(fig)
         plt.close(fig)
@@ -186,6 +200,13 @@ def page_direct():
         up_piot = c1.file_uploader("PIOT CSV", type=["csv"], key="u_piot")
         up_imp = c2.file_uploader("Imports CSV", type=["csv"], key="u_imp")
         up_exp = c3.file_uploader("Exports CSV", type=["csv"], key="u_exp")
+        c4, c5 = st.columns(2)
+        up_de = c4.file_uploader("Domestic Extraction CSV", type=["csv"], key="u_de",
+                                 help="Industry + DE value (long), or a 'DE' row across "
+                                      "industry columns (wide). Used for MID and DMI.")
+        up_ri = c5.file_uploader("Resource Intensity CSV", type=["csv"], key="u_ri",
+                                 help="Per-commodity natural-resource intensity (kg/kg). "
+                                      "Feeds the Leontief indicators (RF, URS).")
         use_sample = st.checkbox("Use the bundled Acetaminophen sample files", value=True,
                                  help="Uncheck to require your own uploads.")
         go = st.button("Compute the Indicators", type="primary")
@@ -194,14 +215,20 @@ def page_direct():
         try:
             if use_sample and up_piot is None:
                 run_compute(_read(SAMPLE["piot"]), _read(SAMPLE["imports"]),
-                            _read(SAMPLE["exports"]), "bundled sample")
+                            _read(SAMPLE["exports"]), "bundled sample",
+                            de_b=_read(SAMPLE["de"]), ri_b=_read(SAMPLE["ri"]))
             else:
                 if up_piot is None:
                     st.error("Please upload a PIOT CSV (or tick the sample box).")
                     st.stop()
                 imp_b = up_imp.getvalue() if up_imp is not None else None
                 exp_b = up_exp.getvalue() if up_exp is not None else None
-                run_compute(up_piot.getvalue(), imp_b, exp_b, "your uploaded files")
+                de_b = up_de.getvalue() if up_de is not None else (
+                    _read(SAMPLE["de"]) if use_sample else None)
+                ri_b = up_ri.getvalue() if up_ri is not None else (
+                    _read(SAMPLE["ri"]) if use_sample else None)
+                run_compute(up_piot.getvalue(), imp_b, exp_b, "your uploaded files",
+                            de_b=de_b, ri_b=ri_b)
             st.success(f"Computed from {st.session_state['source_label']}.")
         except Exception as exc:  # noqa: BLE001
             st.error(f"Computation failed: {exc}")
@@ -221,6 +248,16 @@ def page_direct():
         st.dataframe(out["ptb_table"].style.format(
             {"Imports (kg/yr)": "{:,.0f}", "Exports (kg/yr)": "{:,.0f}", "PTB (kg/yr)": "{:,.0f}"}),
             use_container_width=True)
+
+    # Direct Material Input (DMI = Domestic Extraction + Imports)
+    with st.expander("Direct Material Input (DMI = Domestic Extraction + Imports)", expanded=False):
+        dmi = out["dmi_table"]
+        st.dataframe(dmi.style.format({
+            "Domestic Extraction (kg/yr)": "{:,.0f}", "Imports (kg/yr)": "{:,.0f}",
+            "DMI = DE + Imports (kg/yr)": "{:,.0f}", "MID = Imports/DMI (%)": "{:.3f}"}),
+            use_container_width=True)
+        st.download_button("Download DMI (CSV)", dmi.to_csv().encode(),
+                           "dmi.csv", "text/csv")
 
     st.divider()
     for i, meta in enumerate(em.DIRECT_INDICATORS, start=1):
@@ -265,7 +302,8 @@ def page_leontief():
                    "then return here.", icon="⬅️")
         if st.button("Calculate now from the bundled sample"):
             run_compute(_read(SAMPLE["piot"]), _read(SAMPLE["imports"]),
-                        _read(SAMPLE["exports"]), "bundled sample")
+                        _read(SAMPLE["exports"]), "bundled sample",
+                        de_b=_read(SAMPLE["de"]), ri_b=_read(SAMPLE["ri"]))
             st.rerun()
         return
 
@@ -297,7 +335,8 @@ def page_decision():
                    icon="⬅️")
         if st.button("Calculate now from the bundled sample"):
             run_compute(_read(SAMPLE["piot"]), _read(SAMPLE["imports"]),
-                        _read(SAMPLE["exports"]), "bundled sample")
+                        _read(SAMPLE["exports"]), "bundled sample",
+                        de_b=_read(SAMPLE["de"]), ri_b=_read(SAMPLE["ri"]))
             st.rerun()
         return
 

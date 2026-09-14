@@ -1,0 +1,17 @@
+Commodity,Water,Oxygen,Nitrogen,Air,Argon,Sulphur,Helium,Total_NR_use,Product_output,Resource_Intensity,Dominant_resource,Basis,Source
+Acetaminophen,16728000.0,0.0,0.0,0.0,0.0,0.0,0.0,16728000.0,15315290.0,1.0922418054114549,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Acetic Acid,12373029120.0,0.0,0.0,0.0,0.0,0.0,0.0,12373029120.0,4949211648.0,2.5,Water,Literature estimate,"Lit. estimate ~2.5 kg water/kg (process water, methanol carbonylation); WBCSD Chemical Sector LCA Metrics (2014); ecoinvent chemicals LCI."
+Acetic Anhydride,13980089400.0,0.0,0.0,0.0,0.0,0.0,0.0,13980089400.0,4660029800.0,3.0,Water,Literature estimate,Lit. estimate ~3.0 kg water/kg (ketene/acetic-acid route); WBCSD Chemical Sector LCA Metrics (2014).
+Acetone,1321856.0,0.0,0.0,0.0,0.0,0.0,0.0,1321856.0,876144256.0,0.0015087195869261055,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Ammonia,0.0,0.0,16465659056.000002,0.0,257588032.0,0.0,0.0,16723247088.000002,19296692944.000004,0.8666379848884845,Nitrogen,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Benzene,23708841552.0,0.0,0.0,0.0,0.0,0.0,0.0,23708841552.0,15805894368.0,1.5,Water,Literature estimate,Lit. estimate ~1.5 kg water/kg (aromatics reforming/extraction); DOE/OSTI water LCI for transport fuels (2015); ecoinvent.
+Hydrogen SMR,181292952984.0,0.0,0.0,218021493648.0,0.0,0.0,0.0,399314446632.0,305175084864.0,1.308476564559498,Air,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Iso propanol,2747416392.0,0.0,0.0,0.0,0.0,0.0,0.0,2747416392.0,20609274000.0,0.13330971251097928,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Methane,52479672710.4,0.0,0.0,0.0,0.0,0.0,0.0,52479672710.4,262398363552.0,0.2,Water,Literature estimate,Lit. estimate ~0.2 kg water/kg (natural-gas processing/dehydration); DOE/OSTI water LCI (2015).
+Methanol,5576130224.0,2000376.0,247533888.00000003,59150286104.0,868280.0,0.0,87024.0,64976905896.0,10202575376.0,6.368676878276072,Air,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Naphtha,5489678976.0,0.0,0.0,0.0,0.0,0.0,0.0,5489678976.0,314810385344.0,0.017438049160930034,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Nitric Acid,474812748480.0,0.0,0.0,0.0,0.0,0.0,0.0,474812748480.0,529470938880.0,0.8967682900300071,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Nitro benzene,835728000.0,0.0,0.0,0.0,0.0,0.0,0.0,835728000.0,1885839776.0,0.4431595995777745,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Para aminophenol,13399472.0,0.0,0.0,0.0,0.0,0.0,0.0,13399472.0,14039760.0,0.9543946620170145,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Propene,281112301008.00006,0.0,0.0,0.0,0.0,0.0,0.0,281112301008.00006,12355765843680.0,0.02275150764141339,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
+Sulphuric acid,43672755456.0,0.0,0.0,0.0,0.0,9665728776.0,0.0,53338484232.0,69207869808.0,0.7706996961469027,Water,Computed from PST/PUT,"This study (PST + PUT, scaled kg/yr)"
