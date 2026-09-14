@@ -307,7 +307,7 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
     URS = _safe_div(PRM - pd.Series(r, index=industries), PRM, industries) * 100
 
     results = pd.DataFrame({
-        "PTB": PTB, "MID": MID, "CSID": CSID, "SMIR": DIIS,
+        "PTB": PTB, "CSID": CSID, "SMIR": DIIS,
         "WGI": WGI, "PWPR": PWPR, "MUE": MUE, "MIU": MIU,
         "RF": RF, "WM": WM, "BL": BL, "URS": URS,
     })
@@ -357,17 +357,6 @@ DIRECT_INDICATORS = [
                      "security rides on trade flows that could be interrupted.",
          reference="Eurostat (2018), Economy-wide material flow accounts handbook.",
          decision="Secure domestic supply / onshore?"),
-    dict(key="MID", name="Material Import Dependency", unit="%", diverging=False, direction=+1,
-         formula=r"\mathrm{MID}_j = \dfrac{\mathrm{IMP}_j}{\mathrm{DMI}_j}\times 100,\quad "
-                 r"\mathrm{DMI}_j = \mathrm{DE}_j + \mathrm{IMP}_j",
-         description="The fraction of an industry's direct material input (domestic "
-                     "extraction plus imports) that is covered by imports, as a percentage. "
-                     "A high value means the commodity's material base is sourced abroad and "
-                     "is exposed to trade, tariff and price shocks; a low value means it is "
-                     "met largely from domestic extraction. Imports come from the commodity "
-                     "imports file and DE from the domestic-extraction file.",
-         reference="Eurostat (2018); OECD (2008), Measuring material flows.",
-         decision="Reduce import dependency / diversify suppliers?"),
     dict(key="CSID", name="Cross-Sector Input Dependency", unit="%", diverging=False, direction=+1,
          formula=r"\mathrm{CSID}_j = \dfrac{\sum_{i\neq j} Z_{ij}}{\mathrm{TMI}_j}\times 100",
          description="The share of an industry's total material input supplied by OTHER "
