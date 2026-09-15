@@ -71,6 +71,29 @@ def _read(path):
         return fh.read()
 
 
+def _align_to_industries(src: pd.Series, industries) -> pd.Series:
+    """
+    Map a commodity-indexed series (e.g. PTB) onto the PIOT industry index by
+    name: exact → case-insensitive → unique substring. Generic for any network;
+    unmatched industries get NaN.
+    """
+    exact = {str(k): v for k, v in src.items()}
+    lower = {str(k).strip().lower(): v for k, v in src.items()}
+    out = {}
+    for ind in industries:
+        name = str(ind)
+        if name in exact:
+            out[ind] = exact[name]
+            continue
+        key = name.strip().lower()
+        if key in lower:
+            out[ind] = lower[key]
+            continue
+        hits = [v for k, v in lower.items() if key and (key in k or k in key)]
+        out[ind] = hits[0] if len(hits) == 1 else float("nan")
+    return pd.Series(out, dtype="float64")
+
+
 # --------------------------------------------------------------------------- #
 # Charts
 # --------------------------------------------------------------------------- #
@@ -298,8 +321,9 @@ def page_decision():
         "Each PIOT indicator is ranked across the industries and translated into a "
         "decision: Low, Medium or High priority for the action it implies. Ranking uses "
         "within-network percentiles (oriented so **High** = most action needed), cut at "
-        "the 34th and 67th percentiles. Physical Trade Balance is standalone and not "
-        "included here."
+        "the 34th and 67th percentiles. When the Physical Trade Balance has been computed "
+        "it is included as the top row, ranked the same way (a large net import = High "
+        "priority to secure domestic supply)."
     )
     if "computed" not in st.session_state:
         st.warning("Compute the indicators first on the **EW-MFA Indicators** page.", icon="⬅️")
@@ -309,16 +333,31 @@ def page_decision():
         return
 
     out = st.session_state["computed"]
-    res = out["results"]
+    res = out["results"].copy()
+
+    # --- Fold Physical Trade Balance in as an extra indicator column -------- #
+    metas = list(em.ALL_INDICATORS)
+    has_ptb = False
+    if "ptb" in st.session_state:
+        ptb_series = st.session_state["ptb"]["PTB (kg/yr)"]
+        aligned = _align_to_industries(ptb_series, res.index)
+        if aligned.notna().any():
+            res.insert(0, "PTB", aligned.reindex(res.index))
+            metas = [em.PTB_META] + metas
+            has_ptb = True
+
     labels, _ = em.decision_matrix(res)
 
-    order = [m["key"] for m in em.ALL_INDICATORS]
-    row_label = {m["key"]: f"{m['key']} — {m['decision']}" for m in em.ALL_INDICATORS}
+    order = [m["key"] for m in metas]
+    row_label = {m["key"]: f"{m['key']} — {m['decision']}" for m in metas}
     rows = []
     for key in order:
         for ind in res.index:
+            lvl = labels.loc[ind, key]
+            if pd.isna(lvl):
+                continue
             rows.append({"Decision": row_label[key], "Industry": ind,
-                         "Level": str(labels.loc[ind, key]), "Value": res.loc[ind, key]})
+                         "Level": str(lvl), "Value": res.loc[ind, key]})
     long = pd.DataFrame(rows)
     row_sort = [row_label[k] for k in order]
 
@@ -337,11 +376,15 @@ def page_decision():
                     use_container_width=True)
     st.caption("Green = Low · Amber = Medium · Red = High priority for the action the indicator implies.")
 
+    if not has_ptb:
+        st.info("Compute the Physical Trade Balance on the **EW-MFA Indicators** page to "
+                "add it as the top row of this matrix.", icon="ℹ️")
+
     st.markdown("#### What each indicator decides")
     dd = pd.DataFrame([
         {"Indicator": f"{m['name']} ({m['key']})", "Decision question": m["decision"],
          "High priority when": ("value is HIGH" if m["direction"] > 0 else "value is LOW")}
-        for m in em.ALL_INDICATORS])
+        for m in metas])
     st.dataframe(dd, use_container_width=True, hide_index=True)
     st.download_button("Download decision matrix (CSV)",
                        labels.to_csv().encode(), "ewmfa_decision_matrix.csv", "text/csv")
