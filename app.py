@@ -189,7 +189,6 @@ def page_home():
             st.markdown("**What material-flow analysis (MFA) delivers in manufacturing**")
             lc, mc, rc = st.columns([1, 6, 1])
             mc.image(_mfa, use_container_width=True)
-            st.caption("Reference: Eurostat, Economy-wide material flow accounts (EW-MFA).")
 
     # ---------------- Physical Trade Balance ------------------------------- #
     st.header("1 · Physical Trade Balance")
