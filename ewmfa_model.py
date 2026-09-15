@@ -219,64 +219,63 @@ def _safe_div(n, d, industries):
 
 
 # --------------------------------------------------------------------------- #
-# Full computation
+# Physical Trade Balance — standalone, PIOT-independent, generic for any network
 # --------------------------------------------------------------------------- #
-def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
-                       exports_bytes: bytes | None, de_bytes: bytes | None = None,
-                       ri_bytes: bytes | None = None) -> dict:
+def compute_ptb(imports_bytes: bytes, exports_bytes: bytes) -> pd.DataFrame:
     """
-    Compute the 8 direct + 4 Leontief indicators.
+    Physical Trade Balance from the Imports and Exports files ONLY.
 
-    Material Import Dependency now uses commodity-file imports and
-    DMI = Domestic Extraction + Imports:  MID_j = IMP_j / DMI_j x 100.
-    The Leontief resource-intensity vector r is DMI / total-output.
+        PTB_c = Imports_c - Exports_c
 
-    Returns a dict with:
-      results   : DataFrame [industry x indicator]  (12 columns)
-      ptb_table : DataFrame with resolved main commodity + imports/exports/PTB
-      dmi_table : DataFrame with Domestic Extraction, Imports and DMI
-      accounting: DataFrame of the PIOT accounting vectors
-      industries: list
+    computed per commodity over the union of commodities appearing in the two
+    files. This is fully independent of the PIOT and works for any network.
+
+    Returns a DataFrame indexed by commodity with columns
+    Imports (kg/yr), Exports (kg/yr), PTB (kg/yr), sorted by PTB descending.
+    """
+    impL = read_trade_csv(io.BytesIO(imports_bytes), ["import"])
+    expL = read_trade_csv(io.BytesIO(exports_bytes), ["export"])
+    commodities = sorted(set(impL.index) | set(expL.index))
+    imp = pd.Series({c: float(impL.get(c, 0.0)) for c in commodities})
+    exp = pd.Series({c: float(expL.get(c, 0.0)) for c in commodities})
+    ptb = (imp - exp).astype(float)
+    out = pd.DataFrame({
+        "Imports (kg/yr)": imp, "Exports (kg/yr)": exp, "PTB (kg/yr)": ptb,
+    })
+    out.index.name = "Commodity"
+    return out.sort_values("PTB (kg/yr)", ascending=False)
+
+
+# --------------------------------------------------------------------------- #
+# PIOT-based indicators (Physical Trade Balance is NOT part of these)
+# --------------------------------------------------------------------------- #
+def compute_indicators(piot_bytes: bytes, ri_bytes: bytes | None = None) -> dict:
+    """
+    Compute the PIOT-based indicators for ANY network:
+
+      Direct   : CSID, SMIR, WGI, PWPR, MUE, MIU   (from the PIOT accounting)
+      Leontief : RF, WM, BL, URS                   (from L = (I - A)^-1)
+
+    Physical Trade Balance is computed separately (see compute_ptb) and is not
+    included here. Industries are auto-detected from the PIOT, so the function
+    is generic for any network.
+
+    The Leontief resource-intensity vector r is taken from the resource-intensity
+    file where it matches a commodity; any unmatched commodity falls back to the
+    PIOT-derived primary intensity (imports + rest-of-economy inputs) / output,
+    so the calculation always produces values for an arbitrary network.
+
+    Returns dict: results (DataFrame [industry x 10 indicators]), accounting,
+    industries, spectral_radius, r_source.
     """
     df, industries = load_piot(io.BytesIO(piot_bytes))
     acc = build_accounting(df, industries)
     TMI, PROD, waste = acc["TMI"], acc["PROD"], acc["waste"]
     imports, cross_sector_in, II_in = acc["imports"], acc["cross_sector_in"], acc["II_in"]
 
-    # ----- Physical Trade Balance from the trade files (main product) ------- #
-    if imports_bytes is not None and exports_bytes is not None:
-        impL = read_trade_csv(io.BytesIO(imports_bytes), ["import"])
-        expL = read_trade_csv(io.BytesIO(exports_bytes), ["export"])
-        trade_index = sorted(set(impL.index) | set(expL.index))
-        resolved, imp_vals, exp_vals = {}, {}, {}
-        for ind in industries:
-            c = _resolve_commodity(ind, trade_index)
-            resolved[ind] = c if c is not None else "(not found)"
-            imp_vals[ind] = float(impL.get(c, 0.0)) if c else 0.0
-            exp_vals[ind] = float(expL.get(c, 0.0)) if c else 0.0
-        imports_ptb = pd.Series(imp_vals, index=industries)
-        exports_ptb = pd.Series(exp_vals, index=industries)
-    else:
-        # fall back to the PIOT's own EXPORTS column and IMPORTS row
-        resolved = {i: i for i in industries}
-        imports_ptb = imports.copy()
-        exports_ptb = acc["exports_col"].copy()
-
-    PTB = (imports_ptb - exports_ptb).astype(float)
-
-    # ----- Domestic Extraction, Imports and Direct Material Input ----------- #
-    # "Imports" for MID / DMI come directly from the commodity imports file.
-    imports_commodity = imports_ptb.copy()
-    if de_bytes is not None:
-        DE = load_de(io.BytesIO(de_bytes), industries)
-    else:
-        DE = pd.Series(0.0, index=industries)
-    DMI = (DE + imports_commodity).astype(float)            # DMI = DE + Imports
-
     # ----- Direct indicators ------------------------------------------------ #
-    MID = _safe_div(imports_commodity, DMI, industries) * 100     # IMP / DMI x 100
     CSID = _safe_div(cross_sector_in, TMI, industries) * 100
-    DIIS = _safe_div(II_in, TMI, industries) * 100
+    SMIR = _safe_div(II_in, TMI, industries) * 100
     WGI = _safe_div(waste, TMI, industries) * 100
     PWPR = _safe_div(waste, PROD, industries)
     MUE = _safe_div(PROD, TMI, industries) * 100
@@ -289,43 +288,35 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
     A = Zn * inv_x[np.newaxis, :]
     L = np.linalg.inv(np.eye(len(industries)) - A)
 
-    # Resource intensity r (kg natural resource / kg output). Prefer the uploaded
-    # resource-intensity file; otherwise fall back to DMI / output.
+    # PIOT-derived generic resource intensity (primary inputs per unit output).
+    r_piot = (imports.to_numpy() + acc["ROE_in"].to_numpy()) * inv_x
+    r_source = "PIOT-derived (imports + rest-of-economy) / output"
     if ri_bytes is not None:
-        RI = load_resource_intensity(io.BytesIO(ri_bytes), industries)
-        r = RI.to_numpy(dtype=float)
+        RI = load_resource_intensity(io.BytesIO(ri_bytes), industries).to_numpy(dtype=float)
+        matched = RI > 0
+        if matched.any():
+            r = np.where(matched, RI, r_piot)        # RI where available, else PIOT fallback
+            r_source = ("resource-intensity file"
+                        + ("" if matched.all() else " (PIOT-derived fallback for unmatched commodities)"))
+        else:
+            r = r_piot
     else:
-        RI = pd.Series(DMI.to_numpy() * inv_x, index=industries)
-        r = RI.to_numpy(dtype=float)
+        r = r_piot
+
     w = waste.to_numpy() * inv_x                                     # waste intensity
     y = (acc["final_demand"] + acc["exports_col"] + acc["ROE_out"]).to_numpy(dtype=float)
 
-    PRM = pd.Series(r @ L, index=industries)                        # computed, not reported
+    PRM = pd.Series(r @ L, index=industries)                        # internal (not reported)
     BL = pd.Series(L.sum(axis=0), index=industries)
     WM = pd.Series(w @ L, index=industries)
     RF = PRM * pd.Series(y, index=industries)
     URS = _safe_div(PRM - pd.Series(r, index=industries), PRM, industries) * 100
 
     results = pd.DataFrame({
-        "PTB": PTB, "CSID": CSID, "SMIR": DIIS,
-        "WGI": WGI, "PWPR": PWPR, "MUE": MUE, "MIU": MIU,
+        "CSID": CSID, "SMIR": SMIR, "WGI": WGI, "PWPR": PWPR, "MUE": MUE, "MIU": MIU,
         "RF": RF, "WM": WM, "BL": BL, "URS": URS,
     })
     results.index.name = "Industry"
-
-    ptb_table = pd.DataFrame({
-        "Main commodity": [resolved.get(i, i) for i in industries],
-        "Imports (kg/yr)": imports_ptb, "Exports (kg/yr)": exports_ptb,
-        "PTB (kg/yr)": PTB,
-    }, index=industries)
-
-    dmi_table = pd.DataFrame({
-        "Domestic Extraction (kg/yr)": DE,
-        "Imports (kg/yr)": imports_commodity,
-        "DMI = DE + Imports (kg/yr)": DMI,
-        "MID = Imports/DMI (%)": MID,
-    }, index=industries)
-    dmi_table.index.name = "Industry"
 
     accounting = pd.DataFrame({
         "II_in": acc["II_in"], "Self_use": acc["self_use"],
@@ -336,9 +327,9 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
         "Waste": waste, "Total_output": acc["TO"],
     })
 
-    return dict(results=results, ptb_table=ptb_table, dmi_table=dmi_table,
-                accounting=accounting, industries=industries,
-                spectral_radius=float(np.max(np.abs(np.linalg.eigvals(A)))))
+    return dict(results=results, accounting=accounting, industries=industries,
+                spectral_radius=float(np.max(np.abs(np.linalg.eigvals(A)))),
+                r_source=r_source)
 
 
 # --------------------------------------------------------------------------- #
@@ -346,17 +337,21 @@ def compute_indicators(piot_bytes: bytes, imports_bytes: bytes | None,
 # --------------------------------------------------------------------------- #
 # direction: +1  -> a HIGH value means HIGH priority/need for the decision
 #            -1  -> a LOW value means HIGH priority/need for the decision
+# Physical Trade Balance is a standalone indicator computed from the Imports and
+# Exports files only (see compute_ptb) — independent of the PIOT indicators below.
+PTB_META = dict(
+    key="PTB", name="Physical Trade Balance", unit="kg/yr", diverging=True, direction=+1,
+    formula=r"\mathrm{PTB}_c = \mathrm{IMP}_c - \mathrm{EXP}_c",
+    description="The net physical trade position of each commodity — imports minus exports, "
+                "in kilograms per year, taken straight from the trade files. A positive value "
+                "marks a net importer (the network leans on foreign supply for that commodity); "
+                "a negative value marks a net exporter (domestic output exceeds domestic use). "
+                "It pinpoints where supply security rides on trade flows that could be "
+                "interrupted, and is computed independently of the input–output table.",
+    reference="Eurostat (2018), Economy-wide material flow accounts handbook.",
+    decision="Secure domestic supply / onshore?")
+
 DIRECT_INDICATORS = [
-    dict(key="PTB", name="Physical Trade Balance", unit="kg/yr", diverging=True, direction=+1,
-         formula=r"\mathrm{PTB}_j = \mathrm{IMP}_j - \mathrm{EXP}_j",
-         description="The net physical trade position for the industry's principal traded "
-                     "product — imports minus exports, in kilograms per year. A positive "
-                     "value marks a net importer, meaning the network leans on foreign "
-                     "supply for that commodity; a negative value marks a net exporter, "
-                     "where domestic output exceeds domestic use. It pinpoints where supply "
-                     "security rides on trade flows that could be interrupted.",
-         reference="Eurostat (2018), Economy-wide material flow accounts handbook.",
-         decision="Secure domestic supply / onshore?"),
     dict(key="CSID", name="Cross-Sector Input Dependency", unit="%", diverging=False, direction=+1,
          formula=r"\mathrm{CSID}_j = \dfrac{\sum_{i\neq j} Z_{ij}}{\mathrm{TMI}_j}\times 100",
          description="The share of an industry's total material input supplied by OTHER "
