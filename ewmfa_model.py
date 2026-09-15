@@ -221,23 +221,43 @@ def _safe_div(n, d, industries):
 # --------------------------------------------------------------------------- #
 # Physical Trade Balance — standalone, PIOT-independent, generic for any network
 # --------------------------------------------------------------------------- #
-def compute_ptb(imports_bytes: bytes, exports_bytes: bytes) -> pd.DataFrame:
+def compute_ptb(imports_bytes: bytes, exports_bytes: bytes,
+                industries: list[str] | None = None) -> pd.DataFrame:
     """
-    Physical Trade Balance from the Imports and Exports files ONLY.
+    Physical Trade Balance from the Imports and Exports files.
 
         PTB_c = Imports_c - Exports_c
 
-    computed per commodity over the union of commodities appearing in the two
-    files. This is fully independent of the PIOT and works for any network.
+    If `industries` is None, PTB is computed over the union of commodities in the
+    two trade files (stand-alone mode).
 
-    Returns a DataFrame indexed by commodity with columns
-    Imports (kg/yr), Exports (kg/yr), PTB (kg/yr), sorted by PTB descending.
+    If `industries` is given (the PIOT's commodities), PTB is computed ONLY for
+    those commodities: each PIOT industry is matched to a commodity in the trade
+    files by name (exact -> case-insensitive -> unique substring), and the result
+    is indexed by the PIOT industry name. Unmatched industries appear with zero
+    imports/exports. This is what lets PTB be reported together with the other
+    PIOT-based indicators, over the same commodity set.
+
+    Returns a DataFrame with columns Imports (kg/yr), Exports (kg/yr),
+    PTB (kg/yr), sorted by PTB descending.
     """
     impL = read_trade_csv(io.BytesIO(imports_bytes), ["import"])
     expL = read_trade_csv(io.BytesIO(exports_bytes), ["export"])
-    commodities = sorted(set(impL.index) | set(expL.index))
-    imp = pd.Series({c: float(impL.get(c, 0.0)) for c in commodities})
-    exp = pd.Series({c: float(expL.get(c, 0.0)) for c in commodities})
+
+    if industries is None:
+        commodities = sorted(set(impL.index) | set(expL.index))
+        imp = pd.Series({c: float(impL.get(c, 0.0)) for c in commodities})
+        exp = pd.Series({c: float(expL.get(c, 0.0)) for c in commodities})
+    else:
+        imp_vals, exp_vals = {}, {}
+        for ind in industries:
+            im = _resolve_commodity(ind, impL.index)
+            ex = _resolve_commodity(ind, expL.index)
+            imp_vals[ind] = float(impL.get(im, 0.0)) if im is not None else 0.0
+            exp_vals[ind] = float(expL.get(ex, 0.0)) if ex is not None else 0.0
+        imp = pd.Series(imp_vals)
+        exp = pd.Series(exp_vals)
+
     ptb = (imp - exp).astype(float)
     out = pd.DataFrame({
         "Imports (kg/yr)": imp, "Exports (kg/yr)": exp, "PTB (kg/yr)": ptb,

@@ -165,6 +165,16 @@ def _run_indicators(piot_b, label):
     st.session_state["ind_source"] = label
 
 
+def _run_all(piot_b, imp_b, exp_b, label):
+    """Compute the PIOT indicators AND the PTB together, over the same
+    commodity set: PTB is restricted to the PIOT's industries, matched to the
+    Imports/Exports files by name."""
+    _run_indicators(piot_b, label)
+    industries = st.session_state["computed"]["industries"]
+    st.session_state["ptb"] = em.compute_ptb(imp_b, exp_b, industries=industries)
+    st.session_state["ptb_source"] = label
+
+
 # =========================================================================== #
 # PAGE 1 — Physical Trade Balance + direct EW-MFA indicators
 # =========================================================================== #
@@ -178,9 +188,11 @@ def page_home():
         "on resource efficiency, waste, circularity and trade dependence that support "
         "resource-productivity and sustainability decisions "
         "(Eurostat, *Economy-wide material flow accounts — Handbook*, 2018). "
-        "This app computes those indicators for a manufacturing network: **Physical Trade "
-        "Balance** from the Imports/Exports files alone (no PIOT), and the **other "
-        "indicators** from the PIOT. Both are generic for any network."
+        "This app computes those indicators for a manufacturing network. You upload the "
+        "**Imports**, **Exports** and **PIOT** files together; the **Physical Trade "
+        "Balance** is then calculated for the commodities in the PIOT (matched to the "
+        "trade files by name) and reported alongside the **other indicators** from the "
+        "PIOT. Everything is generic for any network."
     )
 
     _mfa = os.path.join(_HERE, "mfa_overview.png")
@@ -190,37 +202,61 @@ def page_home():
             lc, mc, rc = st.columns([1, 6, 1])
             mc.image(_mfa, use_container_width=True)
 
-    # ---------------- Physical Trade Balance ------------------------------- #
-    st.header("1 · Physical Trade Balance")
+    # ---------------- Combined upload & compute --------------------------- #
+    st.header("1 · Upload the data & compute")
+    st.markdown("Upload the **Imports**, **Exports** and **PIOT** CSVs (or tick the "
+                "sample box), then press **Compute**. The PIOT sets the commodity list; "
+                "the Physical Trade Balance and every other indicator are computed over "
+                "that same set of commodities.")
+    with st.container(border=True):
+        c1, c2, c3 = st.columns(3)
+        up_imp = c1.file_uploader("Imports CSV", type=["csv"], key="imp")
+        up_exp = c2.file_uploader("Exports CSV", type=["csv"], key="exp")
+        up_piot = c3.file_uploader("PIOT CSV", type=["csv"], key="piot")
+        use_sample = st.checkbox("Use the bundled sample files (Imports, Exports & PIOT)",
+                                 value=True, key="all_sample")
+        if st.button("Compute indicators & PTB", type="primary"):
+            try:
+                if use_sample and up_imp is None and up_exp is None and up_piot is None:
+                    pb = _read(SAMPLE["piot"])
+                    ib, eb, lbl = _read(SAMPLE["imports"]), _read(SAMPLE["exports"]), "bundled sample"
+                elif up_piot is not None and up_imp is not None and up_exp is not None:
+                    pb, ib, eb, lbl = (up_piot.getvalue(), up_imp.getvalue(),
+                                       up_exp.getvalue(), "your uploaded files")
+                else:
+                    st.error("Upload ALL THREE files — Imports, Exports and PIOT "
+                             "(or tick the sample box).")
+                    st.stop()
+                _run_all(pb, ib, eb, lbl)
+                st.success(f"Indicators and Physical Trade Balance computed from {lbl}.")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Computation failed: {exc}")
+
+    if "computed" not in st.session_state:
+        st.info("No results yet — provide the three files (or tick the sample box) and "
+                "press **Compute indicators & PTB**.", icon="🧮")
+        return
+
+    out = st.session_state["computed"]
+    res = out["results"]
+    st.caption(f"Source: {st.session_state.get('ind_source','')} · "
+               f"{len(out['industries'])} industries · spectral radius of A = "
+               f"{out['spectral_radius']:.4f}")
+
+    st.divider()
+
+    # ---------------- Physical Trade Balance (over PIOT commodities) ------- #
+    st.header("2 · Physical Trade Balance")
     st.markdown(em.PTB_META["description"])
     st.caption(f"Reference: {em.PTB_META['reference']}")
     st.latex(r"\mathrm{PTB}_c = \mathrm{IMP}_c - \mathrm{EXP}_c")
-    st.markdown("Computed **only from the Imports and Exports files** — independent of "
-                "the PIOT and of every other indicator.")
-    with st.container(border=True):
-        c1, c2 = st.columns(2)
-        up_imp = c1.file_uploader("Imports CSV", type=["csv"], key="imp")
-        up_exp = c2.file_uploader("Exports CSV", type=["csv"], key="exp")
-        ptb_sample = st.checkbox("Use the bundled sample trade files", value=True, key="ptb_sample")
-        if st.button("Compute Physical Trade Balance", type="primary"):
-            try:
-                if ptb_sample and up_imp is None and up_exp is None:
-                    ib, eb, lbl = _read(SAMPLE["imports"]), _read(SAMPLE["exports"]), "bundled sample"
-                elif up_imp is not None and up_exp is not None:
-                    ib, eb, lbl = up_imp.getvalue(), up_exp.getvalue(), "your uploaded files"
-                else:
-                    st.error("Upload BOTH an Imports and an Exports CSV (or tick the sample box).")
-                    st.stop()
-                st.session_state["ptb"] = em.compute_ptb(ib, eb)
-                st.session_state["ptb_source"] = lbl
-                st.success(f"Physical Trade Balance computed from {lbl}.")
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Could not compute PTB: {exc}")
-
+    st.markdown("Computed for the **PIOT's commodities**, matched to the Imports and "
+                "Exports files by name.")
     if "ptb" in st.session_state:
         ptb = st.session_state["ptb"]
-        st.caption(f"Source: {st.session_state.get('ptb_source','')} · {len(ptb)} commodities")
-        n_show = st.slider("Show top N commodities by |PTB|", 5, min(60, len(ptb)),
+        n_matched = int((ptb[["Imports (kg/yr)", "Exports (kg/yr)"]].abs().sum(axis=1) > 0).sum())
+        st.caption(f"{len(ptb)} PIOT commodities · {n_matched} matched to the trade files.")
+        n_show = st.slider("Show top N commodities by |PTB|", 5, max(6, len(ptb)),
                            min(25, len(ptb)), key="ptb_topn")
         st.pyplot(ptb_symlog_figure(ptb, n_show))
         st.caption("Red = net importer (PTB > 0) · Blue = net exporter (PTB < 0). Symmetric-log axis.")
@@ -228,48 +264,17 @@ def page_home():
                                        "PTB (kg/yr)": "{:,.0f}"}), use_container_width=True)
         st.download_button("Download PTB (CSV)", ptb.to_csv().encode(),
                            "physical_trade_balance.csv", "text/csv")
-    else:
-        st.info("No Physical Trade Balance yet — press the button above.", icon="⚖️")
 
     st.divider()
 
     # ---------------- Direct EW-MFA indicators (from the PIOT) ------------- #
-    st.header("2 · EW-MFA Indicators (from the PIOT)")
-    st.markdown("Upload the PIOT to compute the direct indicators. Industries are "
-                "auto-detected, so this is generic for any network. The **Leontief "
-                "Indicators** and **Decision Support** pages use this same computation.")
-    with st.container(border=True):
-        up_piot = st.file_uploader("PIOT CSV", type=["csv"], key="piot")
-        ind_sample = st.checkbox("Use the bundled sample PIOT", value=True, key="ind_sample")
-        if st.button("Compute the Indicators", type="primary"):
-            try:
-                if ind_sample and up_piot is None:
-                    _run_indicators(_read(SAMPLE["piot"]), "bundled sample")
-                elif up_piot is not None:
-                    _run_indicators(up_piot.getvalue(), "your uploaded PIOT")
-                else:
-                    st.error("Upload a PIOT CSV (or tick the sample box).")
-                    st.stop()
-                st.success(f"Indicators computed from {st.session_state['ind_source']}.")
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Computation failed: {exc}")
-
-    if "computed" in st.session_state:
-        out = st.session_state["computed"]
-        res = out["results"]
-        st.caption(f"Source: {st.session_state.get('ind_source','')} · "
-                   f"{len(out['industries'])} industries · spectral radius of A = "
-                   f"{out['spectral_radius']:.4f}")
-        st.divider()
-        for i, meta in enumerate(em.DIRECT_INDICATORS, start=1):
-            render_indicator(meta, res[meta["key"]], i)
-        st.download_button("Download all indicator values (CSV)",
-                           res.to_csv().encode(), "ewmfa_indicators.csv", "text/csv")
-        st.info("Now open **Leontief Indicators** and **Decision Support** in the sidebar.",
-                icon="➡️")
-    else:
-        st.info("No indicators yet — upload a PIOT (or tick the sample box) and press Compute.",
-                icon="🧮")
+    st.header("3 · EW-MFA Indicators (from the PIOT)")
+    for i, meta in enumerate(em.DIRECT_INDICATORS, start=1):
+        render_indicator(meta, res[meta["key"]], i)
+    st.download_button("Download all indicator values (CSV)",
+                       res.to_csv().encode(), "ewmfa_indicators.csv", "text/csv")
+    st.info("Now open **Leontief Indicators** and **Decision Support** in the sidebar.",
+            icon="➡️")
 
 
 # =========================================================================== #
@@ -299,7 +304,7 @@ def page_leontief():
     if "computed" not in st.session_state:
         st.warning("Compute the indicators first on the **EW-MFA Indicators** page.", icon="⬅️")
         if st.button("Compute now from the bundled sample"):
-            _run_indicators(_read(SAMPLE["piot"]), "bundled sample")
+            _run_all(_read(SAMPLE["piot"]), _read(SAMPLE["imports"]), _read(SAMPLE["exports"]), "bundled sample")
             st.rerun()
         return
 
@@ -327,7 +332,7 @@ def page_decision():
     if "computed" not in st.session_state:
         st.warning("Compute the indicators first on the **EW-MFA Indicators** page.", icon="⬅️")
         if st.button("Compute now from the bundled sample"):
-            _run_indicators(_read(SAMPLE["piot"]), "bundled sample")
+            _run_all(_read(SAMPLE["piot"]), _read(SAMPLE["imports"]), _read(SAMPLE["exports"]), "bundled sample")
             st.rerun()
         return
 
