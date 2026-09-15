@@ -110,15 +110,20 @@ def indicator_bar(series: pd.Series, meta: dict) -> alt.Chart:
     dfc = series.rename("value").reset_index()
     dfc = dfc.rename(columns={dfc.columns[0]: "Industry"})
     col = "#3E6E8E" if meta["key"] in ("CSID", "SMIR", "WGI", "PWPR", "MUE", "MIU") else "#4a6fa8"
+    n = int(dfc["value"].notna().sum())
     return (
         alt.Chart(dfc.dropna(subset=["value"]))
-        .mark_bar(color=col)
+        .mark_bar(color=col, size=26)                      # thicker bars
         .encode(
-            x=alt.X("value:Q", title=f"{meta['name']} ({meta['unit']})", axis=alt.Axis(format="~s")),
-            y=alt.Y("Industry:N", sort="-x", title=None),
+            x=alt.X("value:Q", title=f"{meta['name']} ({meta['unit']})",
+                    axis=alt.Axis(format="~s", labelFontSize=13, titleFontSize=15,
+                                  titleFontWeight="bold")),
+            y=alt.Y("Industry:N", sort="-x", title=None,
+                    axis=alt.Axis(labelFontSize=15, labelFontWeight="bold",
+                                  labelLimit=320, labelPadding=6)),
             tooltip=["Industry", alt.Tooltip("value:Q", title=meta["key"], format=",.4g")],
         )
-        .properties(height=26 * dfc["value"].notna().sum() + 30)
+        .properties(height=42 * n + 60)                    # taller / wider chart area
     )
 
 
@@ -143,9 +148,16 @@ def _run_indicators(piot_b, label):
 def page_home():
     st.title("EW-MFA Indicators — APAP manufacturing network")
     st.markdown(
-        "Material-flow indicators for a manufacturing network. **Physical Trade "
-        "Balance** is computed from the Imports/Exports files alone (no PIOT); the "
-        "**direct indicators** come from the PIOT. Both are generic for any network."
+        "**Economy-wide material flow accounting (EW-MFA)** is a standardised framework "
+        "that traces the physical materials — raw inputs, products, wastes/residuals, and "
+        "imports/exports — flowing through an economy or production network, all measured in "
+        "mass units (kg/yr). From these flows it derives a small set of headline indicators "
+        "on resource efficiency, waste, circularity and trade dependence that support "
+        "resource-productivity and sustainability decisions "
+        "(Eurostat, *Economy-wide material flow accounts — Handbook*, 2018). "
+        "This app computes those indicators for a manufacturing network: **Physical Trade "
+        "Balance** from the Imports/Exports files alone (no PIOT), and the **other "
+        "indicators** from the PIOT. Both are generic for any network."
     )
 
     _mfa = os.path.join(_HERE, "mfa_overview.png")
@@ -158,9 +170,11 @@ def page_home():
 
     # ---------------- Physical Trade Balance ------------------------------- #
     st.header("1 · Physical Trade Balance")
+    st.markdown(em.PTB_META["description"])
+    st.caption(f"Reference: {em.PTB_META['reference']}")
+    st.latex(r"\mathrm{PTB}_c = \mathrm{IMP}_c - \mathrm{EXP}_c")
     st.markdown("Computed **only from the Imports and Exports files** — independent of "
                 "the PIOT and of every other indicator.")
-    st.latex(r"\mathrm{PTB}_c = \mathrm{IMP}_c - \mathrm{EXP}_c")
     with st.container(border=True):
         c1, c2 = st.columns(2)
         up_imp = c1.file_uploader("Imports CSV", type=["csv"], key="imp")
