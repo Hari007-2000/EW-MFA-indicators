@@ -165,13 +165,29 @@ def _run_indicators(piot_b, label):
     st.session_state["ind_source"] = label
 
 
+def _restrict_ptb_to_industries(ptb_full: pd.DataFrame, industries) -> pd.DataFrame:
+    """Restrict a full (union) PTB table to the PIOT's commodities, matched by
+    name. Done here in app.py so it works with any ewmfa_model.py version."""
+    imp = _align_to_industries(ptb_full["Imports (kg/yr)"], industries).fillna(0.0)
+    exp = _align_to_industries(ptb_full["Exports (kg/yr)"], industries).fillna(0.0)
+    out = pd.DataFrame({
+        "Imports (kg/yr)": imp, "Exports (kg/yr)": exp,
+        "PTB (kg/yr)": (imp - exp).astype(float),
+    })
+    out.index.name = "Commodity"
+    return out.sort_values("PTB (kg/yr)", ascending=False)
+
+
 def _run_all(piot_b, imp_b, exp_b, label):
     """Compute the PIOT indicators AND the PTB together, over the same
     commodity set: PTB is restricted to the PIOT's industries, matched to the
     Imports/Exports files by name."""
     _run_indicators(piot_b, label)
     industries = st.session_state["computed"]["industries"]
-    st.session_state["ptb"] = em.compute_ptb(imp_b, exp_b, industries=industries)
+    # Call compute_ptb WITHOUT the industries kwarg (works with any model
+    # version), then restrict to the PIOT commodities here.
+    ptb_full = em.compute_ptb(imp_b, exp_b)
+    st.session_state["ptb"] = _restrict_ptb_to_industries(ptb_full, industries)
     st.session_state["ptb_source"] = label
 
 
